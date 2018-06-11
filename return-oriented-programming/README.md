@@ -341,6 +341,86 @@ Generalizing Return-Oriented Programming to RISC][6]
 [7]: https://github.com/JonathanSalwan/ROPgadget
 [8]: http://pages.cs.wisc.edu/~remzi/Classes/354/Fall2012/Handouts/Handout-x86-cheat-sheet.pdf
 
-## Defending against ROP
+## Defending against stack based ROP
 
-=== To be continued Friday ===
+Many different sophisticated methods have been proposed to defend against ROP attacks. Many of them rely on profiling a binary at runtime in an attempt to detect ROP gadget chains being executed. Some tools measure the frequency **ret** instructions are encountered, others check for many short code sequences followed by **ret** or **ret** like instructions being executed in a chain.
+
+The most elegant and effective method we discussed was the [Shadow Stack][9].
+
+### Shadow Stack
+
+The [shadow stack][9] simply pushes the saved eip to a safe location, the "shadow stack", each time a **call** instruction is encountered. Then each time a function returns the real return address is compared with last address pushed to the shadow stack. If the real return address was overwritten it will not match the address saved to the shadow stack and the program can abort.
+
+There are a few cases where a function might leave early without returning to the saved return address.
+
+- An exception is thrown
+- A signal is caught
+- **setjmp**/**longjmp** instructions
+
+The paper [ROPdefender][10] goes into detail about how to handle each of these cases
+
+### Additional Reading
+
+- [ROPdefender paper][10]
+- [Shadow Stack][9]
+
+[9]: https://en.wikipedia.org/wiki/Shadow_stack
+[10]: https://dl.acm.org/citation.cfm?id=1966920
+
+# Jump Oriented Programming (JOP)
+
+Similar to ROP based attack but does not rely on the stack. Instead of chaining together gadgets ending in **ret**, gadgets ending in an indirect jump instruction are used.
+
+JOP attacks consist of a few different pieces. The first and most important piece is the dispatcher. The dispatcher jumps into a set of addresses known as the dispatcher table. The dispatcher table holds the locations of gadget to be called. Each gadget consists of a sequence of useful instructions which must end in a jump back to the dispatcher.
+
+### Dispatcher
+
+The dispatcher's job is to jump to each address in the dispatcher table. To do this it needs to inrement a regisster by some fixed amount and then jump to the address pointed to by that register. 
+
+As an example, if our dispatcher table is a continuous list of 4 byte addresses, a dispatcher might look like the following
+
+```text
+add edx, 4 # point to next address in dispatcher table
+jmp [edx]  # jump to address
+```
+
+### Dispatcher table
+
+The dispatcher table simply holds addresses of each gadget in the JOP chain. The dispatcher table can be on the stack or in the heap. The dispatcher table cn be very large if it is in the heap, allowing for larger JOP chains than what was possible in ROP based attacks.
+
+Going off of the example dispatcher above, the dispatcher table is just a sequence of 4-byte gadget addresses
+
+```text
+    ---------- <-- @DispatcheTable
++0 | @Gadget0
++4 | @Gadget1
++8 | @Gadget2
++12| @Gadget3
+```
+
+### Gadgets
+
+Gadgets are essentially the same as in ROP based attacks only instead of ending in **ret** instructions they must end in an indirect jump back to the dispatcher so that the next gadget can be called and they must not alter the state of the register used by the dispatcher.
+
+This way, each time a gadget is called execution is transferred back to the dispatcher which is able to call the next gadget in the dispatcher table.
+
+### Initializer
+
+There may also be the need for an initializer to set up values before the dispatcher begins. The example dispatcher given above requires that **edx** points to **@DispatcherTable - 4** prior to the dispatcher being called the first time. This is something that would be handled by initializer gadget.
+
+The initializer gadget is the first section of code jumped to in the JOP exploit and does any required preliminary work before jumping to the dispatcher and letting the it take over execution from there.
+
+One easy way to initialize a JOP exploit it to look for a [**popa**][11] instruction. This instruction fills every general purpose register with values from the stack. Values can be placed on the stack such that the attacker is able to fill each register with the desired values using **popa**.
+
+### Additional Reading
+
+- ["Jump-Oriented Programming: A New Class of Code-Reuse
+Attack"][12]
+- ["ROP is Still Dangerous: Breaking Modern Defenses"][13] (Call Oriented Programming)
+- ["Counterfeit Object-oriented Programming"][14] (Code reuse attack specific to C++)
+
+[11]: https://c9x.me/x86/html/file_module_x86_id_249.html
+[12]: https://www.comp.nus.edu.sg/~liangzk/papers/asiaccs11.pdf
+[13]: https://www.usenix.org/system/files/conference/usenixsecurity14/sec14-paper-carlini.pdf
+[14]: http://syssec.rub.de/media/emma/veroeffentlichungen/2015/03/28/COOP-Oakland15.pdf
+
